@@ -1,0 +1,52 @@
+What's New for bmem
+-------------------
+New in 2.8.11:
+- bmem no longer puts itself on top when a full-screen app is detected
+- small change in CPU counting code to consider cores as physical CPUs
+
+New in 2.8.10:
+- OS detection code improved, thanks Anders
+
+New in 2.8.9:
+- virtual memory size clamped to positive in about box too
+- cpu reading more consistent (separated reading and painting timers)
+- Anders' patch to put .ini file in user's data dir for when user not admin. This means your settings will be reset.
+
+New in 2.8.8:
+- oops, fixed bug in CPU usage smoothing calc
+
+New in 2.8.7:
+- added "Launch Taskmgr..." context menu action
+- fixed faulty display of virtual memory when there is no virtual memory at all
+- tuned hd light to track disk activity a little more like a real hd light
+- made cpu usage smoothing use a real history of past values for more precise tracking
+
+New in 2.8.6:
+- virtual memory clamped to display positive lengths only
+- cpucount.h/.cpp now included, whoops
+- added RAM readout in About box
+
+New in 2.8.5:
+- Another tweak to CPU detection code.
+- Improved text formatting to hopefully get rid of negative numbers showing up bug.
+
+New in 2.8.4:
+- All new CPU detection code! Should work even on the dualest of cores.
+
+New in 2.8.3:
+- Fixed dual core CPU detection bug.
+- Added CPU information display in About box.
+
+New in 2.8.2:
+- Darkened blendy edges on graphs, more subtle now/nicer
+- Made minimal size mode one pixel taller (was just too small sometimes otherwise)
+
+New in 2.8.1:
+- Nice blending around bar graphs added
+- Corrected disk I/O light size
+- Added third doubleclick size, supa tiny for laptops and other small screens
+
+New in 2.8.0:
+- Resizing UI has been rewritten. You can now grab and resize the bar from
+  either end. Also, the visible sizer marker has been eliminated.
+- Now detects when screensavers are active and suspends operation.

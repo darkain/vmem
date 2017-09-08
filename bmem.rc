@@ -1,0 +1,176 @@
+//Microsoft Developer Studio generated resource script.
+//
+#include "resource.h"
+
+#define APSTUDIO_READONLY_SYMBOLS
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 2 resource.
+//
+#include "afxres.h"
+
+/////////////////////////////////////////////////////////////////////////////
+#undef APSTUDIO_READONLY_SYMBOLS
+
+/////////////////////////////////////////////////////////////////////////////
+// English (U.S.) resources
+
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
+#ifdef _WIN32
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+#pragma code_page(1252)
+#endif //_WIN32
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Dialog
+//
+
+IDD_BMEM DIALOGEX 0, 0, 196, 12
+STYLE DS_NOFAILCREATE | WS_POPUP
+EXSTYLE WS_EX_TOOLWINDOW
+FONT 8, "MS Sans Serif", 0, 0, 0x1
+BEGIN
+    LTEXT           "SIZE!",IDC_AUTOHEIGHT,0,0,19,12
+END
+
+IDD_ABOUT DIALOGEX 0, 0, 192, 244
+STYLE DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "About bmem"
+FONT 8, "MS Sans Serif"
+BEGIN
+    DEFPUSHBUTTON   "OK",IDOK,135,223,50,14
+    CTEXT           "bmem (Brennan's MEMory Monitor)\nv2.8.11\nby Brennan Underwood\n\nThis is free software,\nsee file license.txt for details",
+                    IDC_STATIC,32,7,153,52
+    ICON            IDI_ICON1,IDC_STATIC,7,7,20,20,SS_SUNKEN
+    LTEXT           "Key:\nLeft display: Physical RAM\n\tYellow bar: Disk cache size\n\tGreen bar: Free RAM\n\nMiddle display: Virtual RAM\n\tRed bar: Free virtual RAM\n\nRight display: CPU usage\n\tBlue bar(s): CPU usage\n\nRed LED: disk activity",
+                    IDC_STATIC,12,112,168,100,0,WS_EX_STATICEDGE
+    CTEXT           "bmem's home is badmofo.org/bmem",IDC_STATIC,7,223,126,
+                    14,SS_CENTERIMAGE
+    CTEXT           "Static",IDC_CPUINFO,12,70,168,31
+    GROUPBOX        "System info",IDC_STATIC,7,57,178,49
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// DESIGNINFO
+//
+
+#ifdef APSTUDIO_INVOKED
+GUIDELINES DESIGNINFO DISCARDABLE 
+BEGIN
+    IDD_BMEM, DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 189
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 5
+    END
+
+    IDD_ABOUT, DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 185
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 237
+    END
+END
+#endif    // APSTUDIO_INVOKED
+
+
+#ifdef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// TEXTINCLUDE
+//
+
+1 TEXTINCLUDE DISCARDABLE 
+BEGIN
+    "resource.h\0"
+END
+
+2 TEXTINCLUDE DISCARDABLE 
+BEGIN
+    "#include ""afxres.h""\r\n"
+    "\0"
+END
+
+3 TEXTINCLUDE DISCARDABLE 
+BEGIN
+    "\r\n"
+    "\0"
+END
+
+#endif    // APSTUDIO_INVOKED
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Icon
+//
+
+// Icon with lowest ID value placed first to ensure application icon
+// remains consistent on all systems.
+IDI_ICON1               ICON    DISCARDABLE     "icon1.ico"
+
+#ifndef _MAC
+/////////////////////////////////////////////////////////////////////////////
+//
+// Version
+//
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 2,8,9,0
+ PRODUCTVERSION 2,8,9,0
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS 0x1L
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS 0x40004L
+ FILETYPE 0x1L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "Comments", "\0"
+            VALUE "CompanyName", "Brennan Underwood\0"
+            VALUE "FileDescription", "bmem\0"
+            VALUE "FileVersion", "2, 8, 9, 0\0"
+            VALUE "InternalName", "bmem\0"
+            VALUE "LegalCopyright", "Copyright © 1998-2008 Brennan Underwood\0"
+            VALUE "LegalTrademarks", "bmem is a trademark of Brennan Underwood\0"
+            VALUE "OriginalFilename", "bmem.exe\0"
+            VALUE "PrivateBuild", "\0"
+            VALUE "ProductName", "  bmem\0"
+            VALUE "ProductVersion", "2, 8, 9, 0\0"
+            VALUE "SpecialBuild", "\0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
+
+#endif    // !_MAC
+
+#endif    // English (U.S.) resources
+/////////////////////////////////////////////////////////////////////////////
+
+
+
+#ifndef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 3 resource.
+//
+
+
+/////////////////////////////////////////////////////////////////////////////
+#endif    // not APSTUDIO_INVOKED
+
