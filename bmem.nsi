@@ -13,6 +13,8 @@ Name "bmem"
 ; The file to write
 OutFile "bmem-install.exe"
 
+Icon "icon1.ico"
+
 ; The default installation directory
 InstallDir $PROGRAMFILES\bmem
 

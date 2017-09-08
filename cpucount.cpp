@@ -43,7 +43,7 @@ unsigned int  HWD_MTSupported(void);
 unsigned int  MaxLogicalProcPerPhysicalProc(void);
 unsigned int  MaxCorePerPhysicalProc(void);
 unsigned int  find_maskwidth(unsigned int);
-unsigned char GetAPIC_ID(void);
+unsigned char myGetAPIC_ID(void);
 unsigned char GetNzbSubID(unsigned char,
 						  unsigned char,
 						  unsigned char);
@@ -414,7 +414,7 @@ unsigned int MaxLogicalProcPerPhysicalProc(void)
 }
 
 
-unsigned char GetAPIC_ID(void)
+unsigned char myGetAPIC_ID(void)
 {
 
 	unsigned int Regebx = 0;
@@ -606,7 +606,7 @@ unsigned char CPUCount(unsigned int *TotAvailLogical,
 		{
 			Sleep(0);  // Ensure system to switch to the right CPU
 #endif
-			apicID = GetAPIC_ID();
+			apicID = myGetAPIC_ID();
 
 
 			// Store SMT ID and core ID of each logical processor

@@ -7,4 +7,5 @@ extern HWND memWindow;
 int createMemWindow(HWND hWnd);
 int destroyMemWindow(HWND hWnd);
 
+
 #endif

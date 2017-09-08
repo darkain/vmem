@@ -20,17 +20,38 @@
 #include "viewport.h"
 #include "wa.h"
 
-#define COLOR_TEXT		RGB(0xf0, 0xf0, 0xf0)
-#define COLOR_TEXT_SHADOW	RGB(0x10, 0x10, 0x10)
-#define COLOR_RAM		RGB(41,200,4)
-#define COLOR_CACHE		RGB(166,191,3)
-#define COLOR_VM		RGB(156,36,28)
-#define COLOR_CPU		RGB(36, 147, 179)
-#define COLOR_CPU_HT		RGB(16, 220, 189)
-#define COLOR_DISKIO		RGB(255,0,0)
-#define COLOR_SIZER		RGB(96, 96, 96)
+extern "C" {
+#include <powrprof.h>
+}
 
-#define MAX_CPUS	1024	 // heh should hold us for a while
+#ifndef _PROCESSOR_POWER_INFORMATION
+typedef struct _PROCESSOR_POWER_INFORMATION {
+  ULONG  Number;
+  ULONG  MaxMhz;
+  ULONG  CurrentMhz;
+  ULONG  MhzLimit;
+  ULONG  MaxIdleState;
+  ULONG  CurrentIdleState;
+} PROCESSOR_POWER_INFORMATION , *PPROCESSOR_POWER_INFORMATION;
+#endif
+
+#define COLOR_TEXT          RGB(0xf0, 0xf0, 0xf0)
+#define COLOR_TEXT_SHADOW   RGB(0x10, 0x10, 0x10)
+#define COLOR_RAM           RGB(  41,  200,    4)
+#define COLOR_CACHE         RGB( 166,  191,    3)
+#define COLOR_VM            RGB( 156,   36,   28)
+#define COLOR_CPU           RGB(  36,  147,  179)
+#define COLOR_CPU_HT        RGB(  16,  220,  189)
+#define COLOR_MHZ           RGB(  36,  180,  114)
+#define COLOR_DISKIO        RGB( 255,    0,    0)
+#define COLOR_SIZER         RGB(  96,   96,   96)
+
+
+#define TEXT_NONE     -1
+#define TEXT_MEMORY    1
+#define TEXT_PERCENT   2
+#define TEXT_MHZ       3
+
 
 #define WINDOW_ALPHA 160
 
@@ -40,16 +61,19 @@
 
 // these pragmas help keep the .exe small
 #pragma optimize("gsy",on)
-#pragma comment(linker,"/RELEASE")
-#pragma comment(linker,"/opt:nowin98")
+//#pragma comment(linker,"/RELEASE")
+//#pragma comment(linker,"/opt:nowin98")
 
 #endif
+
+#pragma comment(lib, "powrprof.lib")
+
 
 #define STRLEN lstrlen
 
 #include "resource.h"
 
-#define APPNAME "bmem"
+#define APPNAME "vmem"
 
 #define TIMER_CPU_READ		2
 #define TIMER_INVALIDATE	3
@@ -107,8 +131,14 @@ BOOL (__stdcall *isWow64Process)(HANDLE hProcess, PBOOL Wow64Process);
 
 static HINSTANCE user32 = NULL;
 static int checked_for_alpha_proc;
-static const int LWA_ALPHA=2;
-static const int WS_EX_LAYERED=0x80000;
+
+#ifndef LWA_ALPHA
+#  define LWA_ALPHA     2;
+#endif 
+
+#ifndef WS_EX_LAYERED
+#  define WS_EX_LAYERED 0x80000;
+#endif
 
 static void (__stdcall *setLayeredWindowAttributes)(HWND, int, int, int);
 void setAlpha(HWND hwnd, int alpha) {
@@ -216,7 +246,7 @@ static bool detectFullScreenWindow() {
 
 int isNT;
 
-RECT phys, virt, cpu, diskio, netio;
+RECT phys, virt, cpu, mhz, diskio, netio;
 
 HWND memWindow = NULL;
 HINSTANCE hInst;
@@ -237,11 +267,11 @@ int popup_showing;
 
 int pagesize;
 
-
+bool show_vm = true;
 
 static void set_config_str(const char *name,const char *str) {
   WritePrivateProfileString(APPNAME, name, str, ".\\" APPNAME".ini");
-} 
+}
 
 static void set_config_int(const char *name, int val) {
   char str[40];
@@ -251,11 +281,12 @@ static void set_config_int(const char *name, int val) {
 }
 
 static int get_config_int(const char *name, int def=0) {
-  char tmp[40], tmp2[40];
-  wsprintf(tmp, "%d", def);
-  wsprintf(tmp2, "%d", def);
-  GetPrivateProfileString(APPNAME, name, tmp2, tmp, sizeof tmp, ".\\"APPNAME".ini");
-  return atoi(tmp);
+  char def_val[20]; // todo: use c++ header file for integer sizes to specify how big a buf we need
+  char buf[20]="";
+  wsprintf(def_val, "%d", def);
+  const int r = GetPrivateProfileString(APPNAME, name, def_val, buf, sizeof buf, ".\\"APPNAME".ini");
+  buf[sizeof(buf-1)] = '\0'; // force 0-termination for safety (even tho api does it)
+  return atoi(buf);
 }
 
 static void init_config_storage() {
@@ -371,21 +402,27 @@ static void goAppbar(HWND hDlg, int side) {
 static void fillRect(HDC hdc, RECT *r, COLORREF color, bool shaded=true) {
   HBRUSH brush = CreateSolidBrush(color);
   const bool rounded = true;
+
   if (!rounded) {
     FillRect(hdc, r, brush);
+
   } else {
     COLORREF brushcolor = color;
-    if (shaded) {
-      // blend in 25% black
+
+    if (shaded) {  // blend in 25% black
       brushcolor = ((color & 0x00fcfcfc) >> 2) + ((color & 0x00fefefe) >> 1);
     }
+
     HBRUSH brush2 = CreateSolidBrush(brushcolor);
+
     RECT cr = *r;
-    cr.left ++; cr.right--;
+    cr.left++; cr.right--;
     if (cr.left < cr.right) FillRect(hdc, &cr, brush2);
+
     cr = *r;
-    cr.top ++; cr.bottom--;
+    cr.top++; cr.bottom--;
     if (cr.top < cr.bottom) FillRect(hdc, &cr, brush);
+
     DeleteObject(brush2);
   }
 
@@ -396,7 +433,7 @@ static void fillRect(HDC hdc, RECT *r, COLORREF color, bool shaded=true) {
 static void renderBox(HDC hdc, RECT r,
   int64 avail, int64 total, int64 line,
   COLORREF color, COLORREF color2,
-  int show_percent, int combine_line, bool shaded=true)
+  int text_type, int combine_line, bool shaded=true)
 {
   const int width = r.right - r.left;
   const int height = r.bottom - r.top;
@@ -432,23 +469,47 @@ static void renderBox(HDC hdc, RECT r,
 
   if (showtext) {
     // label
-    HFONT oldfont;
-    if (!fatfont) oldfont = (HFONT)SelectObject(hdc, GetStockObject(ANSI_VAR_FONT));
+//    HFONT oldfont;
+//    if (!fatfont) oldfont = (HFONT)SelectObject(hdc, GetStockObject(ANSI_VAR_FONT));
+//	PointSize
+//	  SetMapMode(hdc, MM_TEXT);
+    int fh = 0;
+	if (height_div == NORMAL_DIV) {
+		fh = -MulDiv(12, GetDeviceCaps(hdc, LOGPIXELSY), 72);
+	} else {
+		fh = -MulDiv(8, GetDeviceCaps(hdc, LOGPIXELSY), 72);
+	}
+
+	const char  *font_name = "Arial";
+	if (fatfont) font_name = "Arial Bold";
+
+
+	HFONT myFont = CreateFont(fh, 0, 0, 0, FW_NORMAL, 0, 0, 0,
+		DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+		CLEARTYPE_QUALITY, DEFAULT_PITCH, font_name);
+	HFONT oldfont = (HFONT)SelectObject(hdc, myFont);
+
     char txt[512]="";
-    if (show_percent == -1) {
-      strcpy(txt, "");
-    } else {
-      if (show_percent) {
-        if (combine_line && line > 0) {
-          percent = (double)(avail+line) / (double)total;
-        }
-        sprintf(txt, "%2.0f%%", percent * 100.f);
-      } else {
+
+    if (text_type == TEXT_PERCENT) {
+		if (combine_line && line > 0) {
+		  percent = (double)(avail+line) / (double)total;
+		}
+		sprintf_s(txt, sizeof(txt), "%2.0f%%", percent * 100.f);
+
+    } else if (text_type == TEXT_MEMORY) {
         double t = (double)avail;
         t /= (1024.0*1024.0);
-        sprintf(txt, "%2.1f Mb", t);
-      }
-    }
+        sprintf_s(txt, sizeof(txt), "%2.1f Mb", t);
+
+	} else if (text_type == TEXT_MHZ) {
+		double t = (double) avail;
+		sprintf_s(txt, sizeof(txt), "%2.0f MHz", t);
+
+	} else {
+		strcpy_s(txt, 1, "");
+	}
+
 
     SIZE size;
     GetTextExtentPoint32(hdc, txt, STRLEN(txt), &size);
@@ -458,7 +519,7 @@ static void renderBox(HDC hdc, RECT r,
 
       COLORREF oldcolor = SetTextColor(hdc, COLOR_TEXT_SHADOW);
 
-      int texty = r.top+(height - size.cy)/2 - !fatfont;
+      int texty = r.top+(height - size.cy)/2 ;//- !fatfont;
 
       TextOut(hdc, r.left+(width - size.cx)/2+1, texty, txt, STRLEN(txt));
       TextOut(hdc, r.left+(width - size.cx)/2+1, texty+1, txt, STRLEN(txt));
@@ -468,11 +529,14 @@ static void renderBox(HDC hdc, RECT r,
       TextOut(hdc, r.left+(width - size.cx)/2, texty, txt, STRLEN(txt));
 
       // done, clean up
-      if (!fatfont) SelectObject(hdc, oldfont);
+      //if (!fatfont) SelectObject(hdc, oldfont);
+      SelectObject(hdc, oldfont);
 
       SetBkMode(hdc, oldmode);
       SetTextColor(hdc, oldcolor);
     }
+
+	DeleteObject(myFont);
   }//if showtext
 }
 
@@ -522,41 +586,218 @@ int64 *virt_total, int64 *virt_avail) {
   }
 }
 
+double timestamp() {
+  static bool time_inited;
+  static bool has_perf_counters;
+  static LARGE_INTEGER time_freq, time_offset;
+{
+  if (!time_inited) {
+    time_inited = true;
+    const BOOL r = QueryPerformanceFrequency(&time_freq);
+    if (!r) goto fallback;
+    const BOOL r2 = QueryPerformanceCounter(&time_offset);
+    if (!r2) goto fallback;
+    has_perf_counters = true;
+  }
+  if (!has_perf_counters) goto fallback;
+
+  LARGE_INTEGER ll;
+  const BOOL r = QueryPerformanceCounter(&ll);
+
+  if (!r) goto fallback;
+
+  ll.QuadPart -= time_offset.QuadPart;
+
+  const double lld = static_cast<double>(ll.QuadPart);
+  const double llf = static_cast<double>(time_freq.QuadPart);
+
+  return lld / llf;
+}
+
+  fallback:
+
+  //l8r needs winmm.lib return ((double)timeGetTime())/1000.f;
+  return ((double)GetTickCount())/1000.f;
+}
+
 static double final_usage[MAX_CPUS];
 static double allcpu_usage;
 
 void read_cpus() {
-#define NCPUHISTORY 24
+  static double weights[NCPUHISTORY];
+
+  const double interval_s = CPU_INTERVAL; // needs to fit into NCPUHISTORY
+
+  const double now = timestamp();
+  static double last_read_at;
+
   static double prev_usage[MAX_CPUS][NCPUHISTORY];
 
-  allcpu_usage = 0;
+  bool first=false;
+  if (last_read_at == 0) {
+    last_read_at = now - CPU_READ_INTERVAL/1000.;
+    // initialize weights to reasonable values
+    for (int i = 0; i < NCPUHISTORY; i++) {
+      weights[i] = CPU_READ_INTERVAL/1000.;
+    }
+    first = true;
+  }
 
+  const double weight = now - last_read_at;
+  //const double weight = min(now - last_read_at, interval_s/2);	// cap weight to reasonable size
+
+#if 0
+  if (weight <= 0) {	// ensure no time goin backwards
+    return;
+  }
+#endif
+
+  last_read_at = now;
+
+  // advance buffer (future: circular buffer) newest on end, oldest at #0
+  memcpy(weights, weights+1, sizeof(double) * (NCPUHISTORY-1));
+  weights[NCPUHISTORY-1] = weight;
+
+  double total_weight=0;
+  int num_cpuhistory=0;
+  double oldest_sample_weight = 1.f;
+  for (int j = NCPUHISTORY-1; j >= 0; j--) {	// seek backwards for how many samples fit in interval_s
+    num_cpuhistory++;
+    if (num_cpuhistory >= 2 && total_weight >= interval_s) {	//FUCKO epsilon FUCKO magicnum
+      const double diff = total_weight - interval_s;
+      // weight oldest sample so we don't consider the part that's past the interval_s
+      oldest_sample_weight = (diff / interval_s) * weights[j];
+      total_weight += oldest_sample_weight;
+//FUCKO assert total_weight == interval_s?
+      break;
+    }
+    total_weight += weights[j];
+  }
+
+  allcpu_usage = 0;
   for (int i = 0; i < get_num_cpus(); i++) {
     // get the usage for this CPU (0-100)
     const double usage = get_cpu_usage(i);
 
     // add this usage to the list of recent values
-    for (int j = 0; j < NCPUHISTORY-1; j++) {	// move up old ones
-      prev_usage[i][j] = prev_usage[i][j+1];
-    }
+    memcpy(&prev_usage[i][0], &prev_usage[i][1], sizeof(double)*(NCPUHISTORY-1));
     prev_usage[i][NCPUHISTORY-1] = usage;
 
     // sum up all the values
+    // seek backwards from now until we have enough samples
     double sum = 0;
-    for (int k = 0; k < NCPUHISTORY; k++) {
-      sum += prev_usage[i][k];
+    for (int c=0, k = NCPUHISTORY-1; c < num_cpuhistory && k >= 0; c++, k--) {
+      const double ww = (c == (num_cpuhistory-1)) ? oldest_sample_weight : weights[k];
+      //const double ww = weights[k];
+      sum += prev_usage[i][k] * ww;
     }
-    const double avg = sum / NCPUHISTORY;
+
+    const double final = sum / total_weight;
 
     // add to total cpu use
-    allcpu_usage += avg;
+    allcpu_usage += final;
     // and keep track of individual too
-    final_usage[i] = avg;
+    final_usage[i] = final;
   }
 }
 
+
+
+void calculateBoxSizes(HWND hDlg) {
+      RECT r;
+      GetWindowRect(hDlg, &r);
+      // normalize rect to 0,0 in top left corner
+      r.right -= r.left; r.left = 0;
+      r.bottom -= r.top; r.top = 0;
+      int w = r.right;
+      int h = r.bottom;
+
+#if 0//this was tryin to add an extra pixel of border on the desktop/appbar shared side... eh
+      if (appbar_mode && height_div == MAX_HEIGHT_DIV) {
+        switch (appbar_side) {
+          case ABE_TOP:
+            h -= APPBAR_BORDER_WIDTH;
+          break;
+#if 0//later
+          case ABE_BOTTOM:
+            h -= APPBAR_BORDER_WIDTH;
+          break;
+#endif
+        }
+      }
+#endif
+
+      const int topoff = r.top + 1;
+      const int height = r.top + h - VBORDER;
+
+// disk IO light
+      //int diskio_w = h;
+      const int diskio_w = height;
+      const int diskio_x = r.right - diskio_w - 2;
+
+      SetRect(&diskio, diskio_x, topoff, diskio_x+diskio_w, height);
+
+      w -= diskio_w+1;	// for diskio (proportional to height ie a square)
+
+      w -= 1;	// right border, looks better on LCD
+
+      // give the 3 main meters the rest of the space equally
+
+#define PIXELS_BETWEEN_DISPLAYS 3
+      int pixels_between_displays = PIXELS_BETWEEN_DISPLAYS;
+//      if (height_div == MAX_HEIGHT_DIV) pixels_between_displays = 3;
+
+      const int NUM_DISPLAYS = 5 + (show_vm * 2);
+
+      // reserve space in between
+      w -= pixels_between_displays * (NUM_DISPLAYS+1 - 1 - show_vm);	// +1 for diskio -2 for doubled up stuff
+
+      int remain = w % NUM_DISPLAYS;
+      w /= NUM_DISPLAYS;
+
+      int x = r.left + HBORDER;
+      int left = x;
+
+// physical mem
+      x += (w * 2);
+      if (remain) { x++; remain--; }
+      if (remain) { x++; remain--; }
+      SetRect(&phys, left, topoff, x, height);
+
+      x += pixels_between_displays;
+
+	if (show_vm) {
+	// virtual mem
+      left = x;
+      x += (w * 2);
+      if (remain) { x++; remain--; }
+      if (remain) { x++; remain--; }
+      SetRect(&virt, left, topoff, x, height);
+
+      x += pixels_between_displays;
+	}
+
+	// cpu
+      left = x;
+      x += (w * 2);
+      if (remain) { x++; remain--; }
+      if (remain) { x++; remain--; }
+      SetRect(&cpu, left, topoff, x, height);
+
+      x += (pixels_between_displays * 2);
+
+	// mhz
+      left = x;
+      x += w;
+      if (remain) { x++; remain--; }
+      SetRect(&mhz, left, topoff, x, height);
+}
+
+
+
+
 // the main render fn
-static int renderAll(HDC hdc) {
+static int renderAll(HDC hdc, HWND hDlg) {
   // get global mem status
   int64 phys_total=0, phys_avail=0;
   int64 virt_total=0, virt_avail=0;
@@ -599,9 +840,8 @@ static int renderAll(HDC hdc) {
 
 // render physical memory usage
   renderBox(hdc, phys, phys_avail, phys_total, cachesize, COLOR_RAM,
-            COLOR_CACHE, FALSE, FALSE);
+            COLOR_CACHE, TEXT_MEMORY, FALSE);
 
-// render page file usage
   if (isXP) { // XP and up add the size of physical memory to virtual
     virt_avail -= phys_total;
     virt_total -= phys_total;
@@ -610,60 +850,149 @@ static int renderAll(HDC hdc) {
   if (virt_avail < 0) virt_avail = 0;
   if (virt_total < 0) virt_total = 0;
 
-  renderBox(hdc, virt,
-    virt_avail, virt_total, 0,
-    COLOR_VM, 0, FALSE, FALSE);
+  const bool prev_show_vm = show_vm;
+  if (virt_total <= 16*1024*1024) {
+    show_vm = false;
+  } else {
+    show_vm = true;
+  }
+  if (show_vm != prev_show_vm) {
+    calculateBoxSizes(hDlg);
+  }
+
+  if (show_vm) { // render page file usage
+    renderBox(hdc, virt,
+      virt_avail, virt_total, 0,
+      COLOR_VM, 0, TEXT_MEMORY, FALSE);
+  }
 
 // render CPU usage
   const int cpuw = cpu.right - cpu.left;
   const int show_n_cpus = get_num_physical_cpus();
-  const int htcombine = (get_num_cpus() != get_num_physical_cpus());
   if (showindcpu)  {
     // render each cpu
     const int percpuw = cpuw / show_n_cpus;
     int remain = cpuw % show_n_cpus;
     RECT r = cpu;
-    for (int i = 0; i <= get_num_cpus(); i += get_num_cpus() / show_n_cpus) {
-      r.right = r.left + percpuw;
-      if (remain) {
-        r.right++;
-        remain--;
-      }
-      double usage = final_usage[i];
-      double line = 0;
-      if (htcombine) {
-        usage += final_usage[i+1];
+
+    // use core map to determine which cpus are on the same physical core (HT)
+    if (cpu_core_map_valid) {
+      for (int i = 0; i <= get_num_physical_cpus(); i ++) {
+        r.right = r.left + percpuw;
+        if (remain) {
+          r.right++;
+          remain--;
+        }
+
+        const unsigned long cpu_map = cpu_core_map[i];
+        double usage = 0;
+        for (int j = 0; j < sizeof(cpu_map)*8; j++) {
+          const unsigned long bit = 1<<j;
+          if (cpu_map & bit) {
+            usage += final_usage[j];
+          }
+        }
+
+        double line = 0;
         if (usage > 100) {	// HT overflow!
           line = usage - 100;
           usage = 100;
         }
+
+        // round to int for display
+        const int int_usage = (int)(usage+0.5f);
+        const int int_line = (int)(line+0.5f);
+        renderBox(hdc, r, int_usage, 100, int_line, COLOR_CPU, COLOR_CPU_HT, TEXT_PERCENT, TRUE);
+        r.left = r.right + 1;
       }
-      // round to int for display
-      const int int_usage = (int)(usage+0.5f);
-      const int int_line = (int)(line+0.5f);
-      renderBox(hdc, r, int_usage, 100, int_line, COLOR_CPU, COLOR_CPU_HT, TRUE, TRUE);
-      r.left = r.right + 1;
+    } else {	 // fall back on assuming alternating physical/virtual numbering
+      const bool htcombine = (get_num_cpus() != get_num_physical_cpus());
+      for (int i = 0; i < get_num_cpus(); i += get_num_cpus() / show_n_cpus) {
+        r.right = r.left + percpuw;
+        if (remain) {
+          r.right++;
+          remain--;
+        }
+
+		double usage = final_usage[i];
+		if (htcombine) {
+		  usage += final_usage[i+1];
+		}
+
+		double line = 0;
+		if (usage > 100) {	// HT overflow!
+		  line = usage - 100;
+		  usage = 100;
+		}
+
+		// round to int for display
+		const int int_usage = (int)(usage+0.5f);
+		const int int_line = (int)(line+0.5f);
+		renderBox(hdc, r, int_usage, 100, int_line, COLOR_CPU, COLOR_CPU_HT, TEXT_PERCENT, TRUE);
+		r.left = r.right + 1;
+      }
     }
   } else {
     // render all cpus merged into one
     double usage = allcpu_usage;
     double line = 0;
-    if (htcombine) {
-      if (usage > 100*show_n_cpus) {
-        line = usage - 100*show_n_cpus;
-        usage = 100*show_n_cpus;
-      }
+
+    const int max_usage = 100*show_n_cpus;
+    if (usage > max_usage) {
+      line = usage - max_usage;
+      usage = max_usage;
     }
+
     // round to int for display
     const int int_usage = (int)(usage+0.5f);
     const int int_line = (int)(line+0.5f);
-    renderBox(hdc, cpu, int_usage, 100*show_n_cpus, int_line, COLOR_CPU, COLOR_CPU_HT, TRUE, TRUE);
+
+    renderBox(hdc, cpu, int_usage, max_usage, int_line, COLOR_CPU, COLOR_CPU_HT, TEXT_PERCENT, TRUE);
   }
 
-// and disk IO light
-  const int show_disk_light = disk_io;
-  disk_io = 0;
-  renderBox(hdc, diskio, show_disk_light, 1, 0, RGB(255,0,0), 0, -1, FALSE, true);
+
+	//Render MHz value
+	{
+		double usage = 0;
+		double total = 100;
+		usage = 0;
+		PROCESSOR_POWER_INFORMATION info[MAX_CPUS];
+		memset(&info, 0, sizeof(info));
+
+		if (CallNtPowerInformation(ProcessorInformation, NULL, 0, info, sizeof(info)) == ERROR_SUCCESS) {
+			static double prev_usage[NMHZHISTORY] = { -1 };
+			if (prev_usage[0] < 1) {
+				for (int xi=0; xi<NMHZHISTORY; xi++) {
+					prev_usage[xi] = info[0].CurrentMhz;
+				}
+			}
+
+			double subtotal = 0;
+			for (int xi=0; xi<NMHZHISTORY-1; xi++) {
+				prev_usage[xi] = prev_usage[xi+1];
+				subtotal += prev_usage[xi];
+			}
+
+			prev_usage[NMHZHISTORY-1] = info[0].CurrentMhz;
+			
+			subtotal += info[0].CurrentMhz;
+
+			usage = subtotal / NMHZHISTORY;
+			total = info[0].MaxMhz;
+		}
+
+		const int int_usage = (int)(usage+0.5f);
+		const int int_total = (int)(total+0.5f);
+		renderBox(hdc, mhz, int_usage, int_total, 0, COLOR_MHZ, COLOR_CPU_HT, TEXT_MHZ, TRUE);
+	}
+
+
+	// and disk IO light
+	{
+		const int show_disk_light = disk_io;
+		disk_io = 0;
+		renderBox(hdc, diskio, show_disk_light, 1, 0, RGB(255,0,0), 0, TEXT_NONE, FALSE, true);
+	}
 
 //someday
 //  renderBox(hdc, netio, !!net_io, 1, 0, RGB(0,255,0), 0, -1);
@@ -700,11 +1029,12 @@ void keepOnScreen(HWND hwnd) {
 
   /* re-get coords */
   GetWindowRect(hwnd, &r);
-  
+
   set_config_int("xpos",r.left);
   set_config_int("ypos",r.top);
   set_config_int("width",r.right - r.left);
 }
+
 
 #define cardinal(n) (((n)==1)?"":"s")
 
@@ -733,17 +1063,40 @@ LRESULT CALLBACK AboutProc(HWND hDlg, UINT message,WPARAM wParam,LPARAM lParam){
         htmsg = "not supported";
       }
 
+      // report on cpu core map AABB or ABAB or AABBCCDD etc
+      char coremapstr[2000]="\n";
+      if (cpu_core_map_valid && ht_enabled()) {
+        memset(coremapstr, 0, sizeof(coremapstr));
+
+        strcat_s(coremapstr, sizeof(coremapstr), "Core layout: ");
+
+        for (int j = 0; j < sizeof(unsigned long)*8; j++) {
+          const unsigned long bit = 1<<j;
+          for (int i = 0; i < num_cpu_core_map; i++) {
+            if (cpu_core_map[i] & bit) {
+              const char txt[2] = { 'A'+i, '\0' };
+              strcat_s(coremapstr, sizeof(coremapstr), txt);
+              break;
+            }
+          }
+        }
+        strcat_s(coremapstr, sizeof(coremapstr), "\n");
+      }
+
       int64 phys_total, virt_total;
       myGetMemoryStatus(&phys_total, NULL, &virt_total, NULL);
       if (isXP) virt_total -= phys_total;
-      char membuf[1000];
-      double fphys = phys_total / (1024.*1024) + 1;
+      char membuf[1000]="";
+      const double fphys = phys_total / (1024.*1024) + 1;
       double fvirt = virt_total / (1024.*1024) + 1;
       if (fvirt < 0) fvirt = 0;
-      sprintf(membuf, "%0.f Mb physical RAM, %0.f Mb virtual RAM.", fphys, fvirt);
+      sprintf_s(membuf, sizeof(membuf), "%0.f Mb physical RAM, %0.f Mb virtual RAM.", fphys, fvirt);
 
-      char finalbuf[5000];
-      wsprintf(finalbuf, "%s detected.%s\nHyperthreading is %s.\n%s", cpumsg, physvirtmsg, htmsg, membuf);
+      char finalbuf[5000]="";
+      wsprintf(finalbuf,
+        "%s detected.%s\nHyperthreading is %s.\n%s%s",
+        cpumsg, physvirtmsg, htmsg, coremapstr, membuf);
+
       SetWindowText(ctrl, finalbuf);
     }
     return TRUE;
@@ -787,28 +1140,31 @@ LRESULT CALLBACK MemProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam){
       // keep track of our dialog box handle
       memWindow = hDlg;
 
-      SetWindowText(hDlg, "bmem");	// not very i18n friendly I suppose :)
+      SetWindowText(hDlg, APPNAME);
 
       isXP = isXPOrGreater();
+
+      get_cpu_layout();
 
       // reposition where we left it
       init_config_storage();
 
-	  int x = get_config_int("xpos", DEF_X);
-	  int y = get_config_int("ypos", DEF_Y);
-	  int w = get_config_int("width", DEF_WIDTH);
+      const int x = get_config_int("xpos", DEF_X);
+      const int y = get_config_int("ypos", DEF_Y);
+      int w = get_config_int("width", DEF_WIDTH);
       if (w < MINWIDTH) w = MINWIDTH;
 
       // load some options
       height_div = get_config_int("height_div", NORMAL_DIV);
       fatfont = get_config_int("fatfont", DEF_FATFONT);
       showtext = get_config_int("showtext", TRUE);
-      int was_appbar_mode = get_config_int("appbar_mode", FALSE);
+      const int was_appbar_mode = get_config_int("appbar_mode", FALSE);
       appbar_side = get_config_int("appbar_side", ABE_TOP);
       use_alpha = get_config_int("use_alpha", FALSE);
       showindcpu = get_config_int("showindividualcpus", TRUE);
       interval = get_config_int("timer_interval", DEFAULT_INTERVAL);
       set_timer_interval(interval);
+      Sleep(1);	// just a hunch but want to make sure timers are desynced
 
       SetTimer(memWindow, TIMER_CPU_READ, CPU_READ_INTERVAL, NULL);
       SetTimer(memWindow, TIMER_TOPMOST, TOPMOST_INTERVAL, NULL);
@@ -866,7 +1222,7 @@ SystemParametersInfo(SPI_SETWORKAREA, 0, &r, SPIF_SENDCHANGE);
     case WM_ERASEBKGND: {
     }
     return 1;
-     
+
     case WM_PAINT: {
       PAINTSTRUCT ps;
       HDC hdc = BeginPaint(hDlg, &ps);
@@ -886,21 +1242,7 @@ SystemParametersInfo(SPI_SETWORKAREA, 0, &r, SPIF_SENDCHANGE);
 #define BGBRUSH BLACK_BRUSH
       FillRect(hMemDC, &r, (HBRUSH)GetStockObject(BGBRUSH));
 
-#if 0//CUT
-      if (!appbar_mode) {
-        HPEN pen = CreatePen(PS_SOLID, 0, COLOR_SIZER);
-        // draw a sizer
-        HPEN oldpen = (HPEN)SelectObject(hMemDC, pen);
-        for (int i = 0; i < 3; i++) {
-          MoveToEx(hMemDC, (r.right - 3) - i * 2, r.top + VBORDER, NULL);
-          LineTo(hMemDC, (r.right - 3) - i * 2, r.bottom - VBORDER);
-        }
-        SelectObject(hMemDC, oldpen);
-        DeleteObject(pen);
-      }
-#endif
-
-      renderAll(hMemDC);
+      renderAll(hMemDC, hDlg);
 
       // blit the completed bitmap
       BitBlt(hdc, 0, 0, r.right, r.bottom, hMemDC, 0, 0, SRCCOPY);
@@ -1002,8 +1344,9 @@ SystemParametersInfo(SPI_SETWORKAREA, 0, &r, SPIF_SENDCHANGE);
       set_height_div(height_div);
       RECT curwndrect;
       GetWindowRect(hDlg, &curwndrect);
-      int d = 1<<height_div;
-      SetWindowPos(hDlg, HWND_TOPMOST, 0, 0, curwndrect.right - curwndrect.left, (origwndrect.bottom - origwndrect.top)/d+1, SWP_NOMOVE | SWP_NOZORDER);
+      const int d = 1<<height_div;
+      const int h = /*l8r!!GetAsyncKeyState(VK_SHIFT) ? 2 :*/ (origwndrect.bottom - origwndrect.top)/d+1;
+      SetWindowPos(hDlg, HWND_TOPMOST, 0, 0, curwndrect.right - curwndrect.left, h, SWP_NOMOVE | SWP_NOZORDER);
       if (appbar_mode) {
         goAppbar(hDlg, appbar_side);
       } else {
@@ -1039,7 +1382,7 @@ SystemParametersInfo(SPI_SETWORKAREA, 0, &r, SPIF_SENDCHANGE);
           POINT p = pos;
           ScreenToClient(hDlg, &p);
           int neww = origw + (p.x-mouse_x);
-          if (neww < MINWIDTH) break; //CUT neww = MINWIDTH;
+          if (neww < MINWIDTH) break;
           else if (neww > MAXWIDTH) neww = MAXWIDTH;
           SetWindowPos(hDlg, NULL, 0, 0, neww, mousedown_wndrect.bottom - mousedown_wndrect.top, SWP_NOMOVE | SWP_NOZORDER);
         }
@@ -1197,98 +1540,8 @@ SystemParametersInfo(SPI_SETWORKAREA, 0, &r, SPIF_SENDCHANGE);
     break;
 #endif
 
-    case WM_SIZE: {
-      RECT r;
-      GetWindowRect(hDlg, &r);
-      // normalize rect to 0,0 in top left corner
-      r.right -= r.left; r.left = 0;
-      r.bottom -= r.top; r.top = 0;
-      int w = r.right;
-      int h = r.bottom;
-
-#if 0//CUT
-      if (!appbar_mode) {
-        // subtract sizer
-        w -= SIZER_WIDTH;
-      }
-#endif
-
-#if 0//this was tryin to add an extra pixel of border on the desktop/appbar shared side... eh
-      if (appbar_mode && height_div == MAX_HEIGHT_DIV) {
-        switch (appbar_side) {
-          case ABE_TOP:
-            h -= APPBAR_BORDER_WIDTH;
-          break;
-#if 0//later
-          case ABE_BOTTOM:
-            h -= APPBAR_BORDER_WIDTH;
-          break;
-#endif
-        }
-      }
-#endif
-
-      int topoff = r.top + 1;
-      int height = r.top + h - VBORDER;
-
-// disk IO light
-      //int diskio_w = h;
-      int diskio_w = height;
-      int diskio_x = r.right - /*CUT(appbar_mode ? 0 : SIZER_WIDTH) -*/ diskio_w - 2;
-
-      SetRect(&diskio, diskio_x, topoff, diskio_x+diskio_w, height);
-
-      w -= diskio_w+1;	// for diskio (proportional to height ie a square)
-
-      w -= 1;	// right border, looks better on LCD
-
-      // give the 3 main meters the rest of the space equally
-
-#define PIXELS_BETWEEN_DISPLAYS 2
-      int pixels_between_displays = PIXELS_BETWEEN_DISPLAYS;
-      if (height_div == MAX_HEIGHT_DIV) pixels_between_displays = 1;
-#define NUM_DISPLAYS 3
-
-      // reserve space in between
-      w -= pixels_between_displays * (NUM_DISPLAYS+1);	// +1 for diskio
-
-      int remain = w % NUM_DISPLAYS;
-      w /= NUM_DISPLAYS;
-     
-      int x = r.left + HBORDER;
-      int left = x;
-
-// physical mem
-      x += w;
-      if (remain) {
-        x++;
-        remain--;
-      }
-      SetRect(&phys, left, topoff, x, height);
-
-      x += pixels_between_displays;
-
-// virtual mem
-      left = x;
-      x += w;
-      if (remain) {
-        x++;
-        remain--;
-      }
-      SetRect(&virt, left, topoff, x, height);
-
-      x += pixels_between_displays;
-
-// cpu
-      left = x;
-      x += w;
-      if (remain) {
-        x++;
-        remain--;
-      }
-      SetRect(&cpu, left, topoff, x, height);
-
-    }
+    case WM_SIZE:
+      calculateBoxSizes(hDlg);
     break;
 
     case APPBAR_CALLBACK:
@@ -1418,7 +1671,7 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
   SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
 
   if (isNT) {
-    HANDLE hToken;
+    HANDLE hToken = NULL;
     // Enable increase quota privilege
     if (!OpenProcessToken(GetCurrentProcess(),
 				TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
